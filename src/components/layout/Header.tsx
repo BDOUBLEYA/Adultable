@@ -8,7 +8,7 @@ export const Header = () => {
       <div className="flex items-center gap-4">
         <SidebarTrigger />
         <h1 className="text-xl font-semibold bg-gradient-primary bg-clip-text text-transparent">
-          LifeUp
+          Adultable
         </h1>
       </div>
       

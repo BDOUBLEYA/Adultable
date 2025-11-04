@@ -1,255 +1,301 @@
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Calendar, Clock, CheckCircle2, Circle } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { TaskDialog, TaskFormData } from "@/components/planner/TaskDialog";
+import { TaskCard } from "@/components/planner/TaskCard";
+import { useToast } from "@/hooks/use-toast";
+import { isToday, isFuture, parseISO, startOfDay } from "date-fns";
 
-type Task = {
+interface Task {
   id: string;
+  user_id: string;
   title: string;
   category: string;
-  dueDate: string;
-  priority: "low" | "medium" | "high";
+  due_date: string;
+  priority: string;
   completed: boolean;
-};
+}
 
 export default function Planner() {
-  const [tasks] = useState<Task[]>([
-    {
-      id: "1",
-      title: "Complete project proposal",
-      category: "Work",
-      dueDate: "Today, 2:00 PM",
-      priority: "high",
-      completed: false,
-    },
-    {
-      id: "2",
-      title: "Review monthly budget",
-      category: "Finance",
-      dueDate: "Today, 4:00 PM",
-      priority: "medium",
-      completed: false,
-    },
-    {
-      id: "3",
-      title: "Grocery shopping",
-      category: "Personal",
-      dueDate: "Tomorrow",
-      priority: "medium",
-      completed: false,
-    },
-    {
-      id: "4",
-      title: "Call insurance company",
-      category: "Finance",
-      dueDate: "This Week",
-      priority: "low",
-      completed: false,
-    },
-    {
-      id: "5",
-      title: "Submit expense report",
-      category: "Work",
-      dueDate: "Yesterday",
-      priority: "high",
-      completed: true,
-    },
-  ]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return "bg-destructive/10 text-destructive border-destructive/20";
-      case "medium":
-        return "bg-primary/10 text-primary border-primary/20";
-      case "low":
-        return "bg-success/10 text-success border-success/20";
-      default:
-        return "";
+  // Fetch tasks
+  const { data: tasks = [], isLoading } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("*")
+        .order("due_date", { ascending: true });
+      
+      if (error) throw error;
+      return data as Task[];
+    },
+  });
+
+  // Create task mutation
+  const createTaskMutation = useMutation({
+    mutationFn: async (taskData: TaskFormData) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase.from("tasks").insert({
+        user_id: user.id,
+        ...taskData,
+      });
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Task created successfully" });
+      setDialogOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error creating task",
+        description: error.message,
+      });
+    },
+  });
+
+  // Update task mutation
+  const updateTaskMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<Task> }) => {
+      const { error } = await supabase
+        .from("tasks")
+        .update(data)
+        .eq("id", id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Task updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error updating task",
+        description: error.message,
+      });
+    },
+  });
+
+  // Delete task mutation
+  const deleteTaskMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("tasks").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast({ title: "Task deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error deleting task",
+        description: error.message,
+      });
+    },
+  });
+
+  const handleToggleComplete = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (task) {
+      updateTaskMutation.mutate({
+        id,
+        data: { completed: !task.completed },
+      });
     }
   };
 
-  const renderTaskList = (filteredTasks: Task[]) => (
-    <div className="space-y-3">
-      {filteredTasks.map((task) => (
-        <Card
-          key={task.id}
-          className={`shadow-soft hover:shadow-card transition-smooth ${
-            task.completed ? "opacity-60" : ""
-          }`}
-        >
-          <CardContent className="p-4">
-            <div className="flex items-start gap-4">
-              <Checkbox
-                checked={task.completed}
-                className="mt-1"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-4 mb-2">
-                  <h3
-                    className={`font-medium ${
-                      task.completed ? "line-through text-muted-foreground" : ""
-                    }`}
-                  >
-                    {task.title}
-                  </h3>
-                  <Badge
-                    variant="outline"
-                    className={`${getPriorityColor(task.priority)} text-xs shrink-0`}
-                  >
-                    {task.priority}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    {task.dueDate}
-                  </span>
-                  <Badge variant="secondary" className="text-xs">
-                    {task.category}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
+  const handleEdit = (task: Task) => {
+    setEditingTask(task);
+    setDialogOpen(true);
+  };
 
-  const todayTasks = tasks.filter((t) => !t.completed && t.dueDate.includes("Today"));
-  const upcomingTasks = tasks.filter(
-    (t) => !t.completed && !t.dueDate.includes("Today") && !t.dueDate.includes("Yesterday")
-  );
-  const completedTasks = tasks.filter((t) => t.completed);
+  const handleDelete = (id: string) => {
+    if (confirm("Are you sure you want to delete this task?")) {
+      deleteTaskMutation.mutate(id);
+    }
+  };
+
+  const handleSubmit = (formData: TaskFormData) => {
+    if (editingTask) {
+      updateTaskMutation.mutate({
+        id: editingTask.id,
+        data: formData,
+      });
+      setEditingTask(null);
+    } else {
+      createTaskMutation.mutate(formData);
+    }
+  };
+
+  const handleDialogClose = (open: boolean) => {
+    setDialogOpen(open);
+    if (!open) {
+      setEditingTask(null);
+    }
+  };
+
+  // Filter tasks
+  const todayTasks = tasks.filter((task) => {
+    const taskDate = startOfDay(parseISO(task.due_date));
+    const today = startOfDay(new Date());
+    return taskDate.getTime() === today.getTime() && !task.completed;
+  });
+
+  const upcomingTasks = tasks.filter((task) => {
+    const taskDate = parseISO(task.due_date);
+    return isFuture(taskDate) && !isToday(taskDate) && !task.completed;
+  });
+
+  const completedTasks = tasks.filter((task) => task.completed);
+
+  const activeTasksCount = tasks.filter((t) => !t.completed).length;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold mb-2">Smart Planner</h1>
-          <p className="text-muted-foreground">Organize your tasks and stay on top of deadlines</p>
+          <p className="text-muted-foreground">Organize your tasks and stay on top of your goals</p>
         </div>
-        <Button className="shadow-soft">
+        <Button onClick={() => setDialogOpen(true)} className="shadow-soft">
           <Plus className="mr-2 h-4 w-4" />
           Add Task
         </Button>
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card className="shadow-card">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <Circle className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{tasks.filter((t) => !t.completed).length}</p>
-                <p className="text-sm text-muted-foreground">Active Tasks</p>
-              </div>
-            </div>
-          </CardContent>
+          <CardHeader className="pb-2">
+            <CardDescription>Active Tasks</CardDescription>
+            <CardTitle className="text-3xl">{activeTasksCount}</CardTitle>
+          </CardHeader>
         </Card>
-
         <Card className="shadow-card">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                <Clock className="h-5 w-5 text-destructive" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{todayTasks.length}</p>
-                <p className="text-sm text-muted-foreground">Due Today</p>
-              </div>
-            </div>
-          </CardContent>
+          <CardHeader className="pb-2">
+            <CardDescription>Due Today</CardDescription>
+            <CardTitle className="text-3xl">{todayTasks.length}</CardTitle>
+          </CardHeader>
         </Card>
-
         <Card className="shadow-card">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
-                <CheckCircle2 className="h-5 w-5 text-success" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{completedTasks.length}</p>
-                <p className="text-sm text-muted-foreground">Completed</p>
-              </div>
-            </div>
-          </CardContent>
+          <CardHeader className="pb-2">
+            <CardDescription>Completed</CardDescription>
+            <CardTitle className="text-3xl">{completedTasks.length}</CardTitle>
+          </CardHeader>
         </Card>
-
         <Card className="shadow-card">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <Calendar className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{upcomingTasks.length}</p>
-                <p className="text-sm text-muted-foreground">Upcoming</p>
-              </div>
-            </div>
-          </CardContent>
+          <CardHeader className="pb-2">
+            <CardDescription>Upcoming</CardDescription>
+            <CardTitle className="text-3xl">{upcomingTasks.length}</CardTitle>
+          </CardHeader>
         </Card>
       </div>
 
-      {/* Task Tabs */}
-      <Tabs defaultValue="today" className="space-y-6">
-        <TabsList className="grid w-full md:w-auto md:inline-grid grid-cols-3">
-          <TabsTrigger value="today">Today</TabsTrigger>
-          <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
-          <TabsTrigger value="completed">Completed</TabsTrigger>
+      {/* Tasks Tabs */}
+      <Tabs defaultValue="today" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="today">Today ({todayTasks.length})</TabsTrigger>
+          <TabsTrigger value="upcoming">Upcoming ({upcomingTasks.length})</TabsTrigger>
+          <TabsTrigger value="completed">Completed ({completedTasks.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="today" className="space-y-4">
-          {todayTasks.length > 0 ? (
-            renderTaskList(todayTasks)
-          ) : (
+        <TabsContent value="today" className="space-y-4 mt-6">
+          {todayTasks.length === 0 ? (
             <Card className="shadow-card">
               <CardContent className="pt-6 text-center py-12">
-                <CheckCircle2 className="h-12 w-12 text-success mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">All caught up!</h3>
-                <p className="text-muted-foreground">No tasks due today. Great work!</p>
+                <p className="text-muted-foreground">No tasks due today. Great job!</p>
               </CardContent>
             </Card>
+          ) : (
+            todayTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggleComplete={handleToggleComplete}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))
           )}
         </TabsContent>
 
-        <TabsContent value="upcoming" className="space-y-4">
-          {upcomingTasks.length > 0 ? (
-            renderTaskList(upcomingTasks)
-          ) : (
+        <TabsContent value="upcoming" className="space-y-4 mt-6">
+          {upcomingTasks.length === 0 ? (
             <Card className="shadow-card">
               <CardContent className="pt-6 text-center py-12">
-                <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No upcoming tasks</h3>
-                <p className="text-muted-foreground">You're all set for the future!</p>
+                <p className="text-muted-foreground">No upcoming tasks</p>
               </CardContent>
             </Card>
+          ) : (
+            upcomingTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggleComplete={handleToggleComplete}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))
           )}
         </TabsContent>
 
-        <TabsContent value="completed" className="space-y-4">
-          {completedTasks.length > 0 ? (
-            renderTaskList(completedTasks)
-          ) : (
+        <TabsContent value="completed" className="space-y-4 mt-6">
+          {completedTasks.length === 0 ? (
             <Card className="shadow-card">
               <CardContent className="pt-6 text-center py-12">
-                <Circle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No completed tasks</h3>
-                <p className="text-muted-foreground">Start checking off your to-dos!</p>
+                <p className="text-muted-foreground">No completed tasks yet</p>
               </CardContent>
             </Card>
+          ) : (
+            completedTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggleComplete={handleToggleComplete}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))
           )}
         </TabsContent>
       </Tabs>
+
+      <TaskDialog
+        open={dialogOpen}
+        onOpenChange={handleDialogClose}
+        onSubmit={handleSubmit}
+        initialData={editingTask ? {
+          title: editingTask.title,
+          category: editingTask.category,
+          due_date: editingTask.due_date,
+          priority: editingTask.priority as "low" | "medium" | "high",
+        } : undefined}
+        title={editingTask ? "Edit Task" : "Create New Task"}
+        description={editingTask ? "Update your task details" : "Add a new task to your planner"}
+      />
     </div>
   );
 }
