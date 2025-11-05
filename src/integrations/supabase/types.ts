@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_sessions: {
+        Row: {
+          created_at: string | null
+          id: string
+          messages: Json | null
+          session_type: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          messages?: Json | null
+          session_type: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          messages?: Json | null
+          session_type?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       forms: {
         Row: {
           created_at: string
@@ -175,34 +202,43 @@ export type Database = {
       }
       tasks: {
         Row: {
+          all_day: boolean | null
           category: string
           completed: boolean
           created_at: string
           due_date: string
+          end_time: string | null
           id: string
           priority: string
+          start_time: string | null
           title: string
           updated_at: string
           user_id: string
         }
         Insert: {
+          all_day?: boolean | null
           category: string
           completed?: boolean
           created_at?: string
           due_date: string
+          end_time?: string | null
           id?: string
           priority: string
+          start_time?: string | null
           title: string
           updated_at?: string
           user_id: string
         }
         Update: {
+          all_day?: boolean | null
           category?: string
           completed?: boolean
           created_at?: string
           due_date?: string
+          end_time?: string | null
           id?: string
           priority?: string
+          start_time?: string | null
           title?: string
           updated_at?: string
           user_id?: string

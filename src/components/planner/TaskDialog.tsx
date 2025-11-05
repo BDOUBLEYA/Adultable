@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { format } from "date-fns";
 
 export interface TaskFormData {
@@ -11,6 +12,9 @@ export interface TaskFormData {
   category: string;
   due_date: string;
   priority: "low" | "medium" | "high";
+  start_time?: string;
+  end_time?: string;
+  all_day: boolean;
 }
 
 interface TaskDialogProps {
@@ -28,17 +32,28 @@ export function TaskDialog({ open, onOpenChange, onSubmit, initialData, title, d
     category: "personal",
     due_date: format(new Date(), "yyyy-MM-dd"),
     priority: "medium",
+    start_time: "09:00",
+    end_time: "10:00",
+    all_day: true,
   });
 
   useEffect(() => {
     if (initialData) {
-      setFormData(initialData);
-    } else {
+      setFormData({
+        ...initialData,
+        start_time: initialData.start_time || "09:00",
+        end_time: initialData.end_time || "10:00",
+        all_day: initialData.all_day ?? true,
+      });
+    } else if (!open) {
       setFormData({
         title: "",
         category: "personal",
         due_date: format(new Date(), "yyyy-MM-dd"),
         priority: "medium",
+        start_time: "09:00",
+        end_time: "10:00",
+        all_day: true,
       });
     }
   }, [initialData, open]);
@@ -113,6 +128,40 @@ export function TaskDialog({ open, onOpenChange, onSubmit, initialData, title, d
               </SelectContent>
             </Select>
           </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="all-day">All Day Task</Label>
+              <Switch
+                id="all-day"
+                checked={formData.all_day}
+                onCheckedChange={(checked) => setFormData({ ...formData, all_day: checked })}
+              />
+            </div>
+          </div>
+
+          {!formData.all_day && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="start-time">Start Time</Label>
+                <Input
+                  id="start-time"
+                  type="time"
+                  value={formData.start_time}
+                  onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="end-time">End Time</Label>
+                <Input
+                  id="end-time"
+                  type="time"
+                  value={formData.end_time}
+                  onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
           
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
