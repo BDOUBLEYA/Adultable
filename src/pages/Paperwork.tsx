@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileText, Upload, Download, Trash2 } from "lucide-react";
@@ -12,6 +12,7 @@ export default function Paperwork() {
   const [uploading, setUploading] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const { data: forms = [], isLoading } = useQuery({
     queryKey: ["forms"],
@@ -103,13 +104,22 @@ export default function Paperwork() {
           </div>
           <h3 className="text-lg font-semibold mb-2">Upload Your Forms</h3>
           <p className="text-muted-foreground mb-4">Upload PDFs, images, and documents</p>
-          <label>
-            <Button className="shadow-soft" disabled={uploading}>
-              <Upload className="mr-2 h-4 w-4" />
-              {uploading ? "Uploading..." : "Choose Files"}
-            </Button>
-            <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={handleFileUpload} disabled={uploading} />
-          </label>
+          <Button 
+            className="shadow-soft" 
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {uploading ? "Uploading..." : "Choose Files"}
+          </Button>
+          <input 
+            ref={fileInputRef}
+            type="file" 
+            className="hidden" 
+            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" 
+            onChange={handleFileUpload} 
+            disabled={uploading} 
+          />
         </CardContent>
       </Card>
 
