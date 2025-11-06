@@ -44,6 +44,7 @@ export type Database = {
       forms: {
         Row: {
           created_at: string
+          extracted_fields: Json | null
           file_size: number | null
           file_type: string | null
           file_url: string
@@ -55,6 +56,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          extracted_fields?: Json | null
           file_size?: number | null
           file_type?: string | null
           file_url: string
@@ -66,6 +68,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          extracted_fields?: Json | null
           file_size?: number | null
           file_type?: string | null
           file_url?: string

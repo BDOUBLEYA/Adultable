@@ -1,15 +1,23 @@
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Upload, Download, Trash2 } from "lucide-react";
+import { FileText, Upload, Download, Trash2, Eye, Edit } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function Paperwork() {
   const [uploading, setUploading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [selectedForm, setSelectedForm] = useState<any>(null);
+  const [showFieldsDialog, setShowFieldsDialog] = useState(false);
+  const [showViewDialog, setShowViewDialog] = useState(false);
+  const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -66,23 +74,112 @@ export default function Paperwork() {
 
       if (uploadError) throw uploadError;
 
-      const { error: dbError } = await supabase.from("forms").insert({
-        user_id: user.id,
-        file_url: fileName,
-        form_name: file.name,
-        file_type: file.type,
-        file_size: file.size,
-      });
+      const { data: insertedForm, error: dbError } = await supabase
+        .from("forms")
+        .insert({
+          user_id: user.id,
+          file_url: fileName,
+          form_name: file.name,
+          file_type: file.type,
+          file_size: file.size,
+          status: "processing",
+        })
+        .select()
+        .single();
 
       if (dbError) throw dbError;
 
       toast({ title: "Form uploaded successfully" });
       queryClient.invalidateQueries({ queryKey: ["forms"] });
+
+      // Scan the document
+      setScanning(true);
+      const { data: scanResult, error: scanError } = await supabase.functions.invoke("scan-document", {
+        body: { fileUrl: fileName, fileName: file.name },
+      });
+
+      if (scanError) throw scanError;
+
+      // Update form with extracted fields
+      const { error: updateError } = await supabase
+        .from("forms")
+        .update({
+          extracted_fields: scanResult.fields,
+          status: "scanned",
+        })
+        .eq("id", insertedForm.id);
+
+      if (updateError) throw updateError;
+
+      queryClient.invalidateQueries({ queryKey: ["forms"] });
+
+      // Show fields dialog
+      setSelectedForm({ ...insertedForm, extracted_fields: scanResult.fields });
+      setFieldValues({});
+      setShowFieldsDialog(true);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message });
     } finally {
       setUploading(false);
+      setScanning(false);
       e.target.value = "";
+    }
+  };
+
+  const handleSaveFields = async () => {
+    if (!selectedForm) return;
+
+    try {
+      const updatedFields = selectedForm.extracted_fields.map((field: any) => ({
+        ...field,
+        value: fieldValues[field.name] || "",
+      }));
+
+      const { error } = await supabase
+        .from("forms")
+        .update({
+          extracted_fields: updatedFields,
+          status: "completed",
+        })
+        .eq("id", selectedForm.id);
+
+      if (error) throw error;
+
+      toast({ title: "Form fields saved successfully" });
+      queryClient.invalidateQueries({ queryKey: ["forms"] });
+      setShowFieldsDialog(false);
+      setSelectedForm(null);
+      setFieldValues({});
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message });
+    }
+  };
+
+  const handleViewForm = async (form: any) => {
+    setSelectedForm(form);
+    const values: Record<string, any> = {};
+    form.extracted_fields?.forEach((field: any) => {
+      values[field.name] = field.value || "";
+    });
+    setFieldValues(values);
+    setShowViewDialog(true);
+  };
+
+  const handleDownload = async (form: any) => {
+    try {
+      const { data, error } = await supabase.storage.from("forms").download(form.file_url);
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = form.form_name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message });
     }
   };
 
@@ -106,11 +203,11 @@ export default function Paperwork() {
           <p className="text-muted-foreground mb-4">Upload PDFs, images, and documents</p>
           <Button 
             className="shadow-soft" 
-            disabled={uploading}
+            disabled={uploading || scanning}
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="mr-2 h-4 w-4" />
-            {uploading ? "Uploading..." : "Choose Files"}
+            {uploading ? "Uploading..." : scanning ? "Scanning..." : "Choose Files"}
           </Button>
           <input 
             ref={fileInputRef}
@@ -137,7 +234,11 @@ export default function Paperwork() {
                 <h3 className="font-medium mb-2 truncate">{form.form_name}</h3>
                 <p className="text-xs text-muted-foreground mb-4">Uploaded {format(new Date(form.created_at), "MMM d, yyyy")}</p>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1"><Download className="h-4 w-4" /></Button>
+                  <Button variant="outline" size="sm" onClick={() => handleViewForm(form)}><Eye className="h-4 w-4" /></Button>
+                  <Button variant="outline" size="sm" onClick={() => handleDownload(form)}><Download className="h-4 w-4" /></Button>
+                  {form.status !== "completed" && Array.isArray(form.extracted_fields) && form.extracted_fields.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => { setSelectedForm(form); setFieldValues({}); setShowFieldsDialog(true); }}><Edit className="h-4 w-4" /></Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => confirm("Delete?") && deleteFormMutation.mutate(form.id)}><Trash2 className="h-4 w-4" /></Button>
                 </div>
               </CardContent>
@@ -145,6 +246,64 @@ export default function Paperwork() {
           ))}
         </div>
       )}
+
+      <Dialog open={showFieldsDialog} onOpenChange={setShowFieldsDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Fill Form Fields</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedForm?.extracted_fields?.map((field: any, index: number) => (
+              <div key={index} className="space-y-2">
+                <Label htmlFor={field.name}>
+                  {field.label}
+                  {field.required && <span className="text-destructive ml-1">*</span>}
+                </Label>
+                <Input
+                  id={field.name}
+                  type={field.type}
+                  value={fieldValues[field.name] || ""}
+                  onChange={(e) => setFieldValues({ ...fieldValues, [field.name]: e.target.value })}
+                  required={field.required}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowFieldsDialog(false)}>Cancel</Button>
+            <Button onClick={handleSaveFields}>Save</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedForm?.form_name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {Array.isArray(selectedForm?.extracted_fields) && selectedForm.extracted_fields.length > 0 ? (
+              selectedForm.extracted_fields.map((field: any, index: number) => (
+                <div key={index} className="space-y-2">
+                  <Label className="font-semibold">{field.label}</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {field.value || <em className="text-muted-foreground/60">Not filled</em>}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="text-muted-foreground text-center py-4">No fields extracted from this document</p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowViewDialog(false)}>Close</Button>
+            <Button onClick={() => handleDownload(selectedForm)}>
+              <Download className="mr-2 h-4 w-4" />
+              Download
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
