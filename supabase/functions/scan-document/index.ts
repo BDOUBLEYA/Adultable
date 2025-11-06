@@ -29,8 +29,26 @@ serve(async (req) => {
 
     // Convert file to base64
     const arrayBuffer = await fileData.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-    const mimeType = fileData.type || "application/pdf";
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Convert to base64 more efficiently
+    let binary = '';
+    const chunkSize = 0x8000; // 32KB chunks
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, Array.from(uint8Array.subarray(i, i + chunkSize)));
+    }
+    const base64 = btoa(binary);
+    
+    // Determine proper MIME type
+    let mimeType = fileData.type;
+    if (!mimeType) {
+      if (fileName.toLowerCase().endsWith('.pdf')) mimeType = 'application/pdf';
+      else if (fileName.toLowerCase().endsWith('.png')) mimeType = 'image/png';
+      else if (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) mimeType = 'image/jpeg';
+      else mimeType = 'application/octet-stream';
+    }
+
+    console.log("File type:", mimeType, "Size:", arrayBuffer.byteLength);
 
     // Call Lovable AI to analyze the document
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -40,17 +58,22 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",
         messages: [
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: `Analyze this document and extract all form fields that need to be filled out. Return ONLY a JSON array of field objects with this structure:
-[{"name": "field_name", "type": "text|number|date|email", "label": "Human readable label", "required": true|false}]
+                text: `Analyze this document image carefully and extract all form fields that need to be filled out. Look for labels, input boxes, checkboxes, and any areas where information should be entered.
 
-Do not include any other text, only the JSON array.`
+Return ONLY a valid JSON array with this exact structure:
+[{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]
+
+Available types: text, number, date, email
+Make field names lowercase with underscores (e.g., "first_name", "date_of_birth").
+
+If you cannot identify any fields, return an empty array: []`
               },
               {
                 type: "image_url",
