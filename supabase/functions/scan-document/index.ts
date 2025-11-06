@@ -50,6 +50,15 @@ serve(async (req) => {
 
     console.log("File type:", mimeType, "Size:", arrayBuffer.byteLength);
 
+    // If not an image, return gracefully with message (avoid 500s)
+    if (!mimeType.startsWith('image/')) {
+      console.warn('Unsupported file type for automated scanning:', mimeType);
+      return new Response(
+        JSON.stringify({ fields: [], error: 'This file type is not supported for automated scanning. Please upload an image (PNG/JPEG).' }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Call Lovable AI to analyze the document
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -88,20 +97,25 @@ If you cannot identify any fields, return an empty array: []`
     });
 
     if (!response.ok) {
-      console.error("AI gateway error:", response.status, await response.text());
+      const text = await response.text();
+      console.error("AI gateway error:", response.status, text);
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment.", fields: [] }), {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI service requires payment. Please check your workspace usage." }), {
+        return new Response(JSON.stringify({ error: "AI service requires payment. Please check your workspace usage.", fields: [] }), {
           status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      throw new Error("AI gateway error");
+      // For other errors, return 200 with empty fields to avoid breaking the UI
+      return new Response(JSON.stringify({ fields: [], error: `AI analysis failed: ${text || 'Unknown error'}` }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const data = await response.json();
@@ -119,7 +133,11 @@ If you cannot identify any fields, return an empty array: []`
       }
     } catch (e) {
       console.error("Failed to parse AI response:", content);
-      throw new Error("Failed to parse document fields");
+      // Return gracefully with empty fields
+      return new Response(JSON.stringify({ fields: [], error: "Failed to parse document fields" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     console.log("Extracted fields:", fields);

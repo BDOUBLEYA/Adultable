@@ -18,6 +18,7 @@ export default function Paperwork() {
   const [showFieldsDialog, setShowFieldsDialog] = useState(false);
   const [showViewDialog, setShowViewDialog] = useState(false);
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
+  const [viewUrl, setViewUrl] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -98,14 +99,23 @@ export default function Paperwork() {
         body: { fileUrl: fileName, fileName: file.name },
       });
 
-      if (scanError) throw scanError;
+      // Handle invoke/network errors
+      if (scanError) {
+        console.error('scan-document invoke error:', scanError);
+        await supabase.from("forms").update({ status: "uploaded" }).eq("id", insertedForm.id);
+        throw scanError;
+      }
 
-      // Update form with extracted fields
+      const fields = Array.isArray(scanResult?.fields) ? scanResult.fields : [];
+      const analysisError = scanResult?.error as string | undefined;
+
+      // Update form with extracted fields (or empty) and status
+      const nextStatus = fields.length > 0 ? "scanned" : "uploaded";
       const { error: updateError } = await supabase
         .from("forms")
         .update({
-          extracted_fields: scanResult.fields,
-          status: "scanned",
+          extracted_fields: fields,
+          status: nextStatus,
         })
         .eq("id", insertedForm.id);
 
@@ -113,10 +123,17 @@ export default function Paperwork() {
 
       queryClient.invalidateQueries({ queryKey: ["forms"] });
 
-      // Show fields dialog
-      setSelectedForm({ ...insertedForm, extracted_fields: scanResult.fields });
-      setFieldValues({});
-      setShowFieldsDialog(true);
+      if (analysisError) {
+        toast({ variant: "destructive", title: "Scan issue", description: analysisError });
+      }
+
+      // Show fields dialog only if we actually have fields
+      if (fields.length > 0) {
+        setSelectedForm({ ...insertedForm, extracted_fields: fields, id: insertedForm.id });
+        setFieldValues({});
+        setShowFieldsDialog(true);
+      }
+
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message });
     } finally {
@@ -156,13 +173,17 @@ export default function Paperwork() {
   };
 
   const handleViewForm = async (form: any) => {
-    setSelectedForm(form);
-    const values: Record<string, any> = {};
-    form.extracted_fields?.forEach((field: any) => {
-      values[field.name] = field.value || "";
-    });
-    setFieldValues(values);
-    setShowViewDialog(true);
+    try {
+      setSelectedForm(form);
+      const { data: signed, error } = await supabase.storage
+        .from("forms")
+        .createSignedUrl(form.file_url, 300);
+      if (error) throw error;
+      setViewUrl(signed?.signedUrl || null);
+      setShowViewDialog(true);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message });
+    }
   };
 
   const handleDownload = async (form: any) => {
@@ -277,22 +298,28 @@ export default function Paperwork() {
       </Dialog>
 
       <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>{selectedForm?.form_name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            {Array.isArray(selectedForm?.extracted_fields) && selectedForm.extracted_fields.length > 0 ? (
-              selectedForm.extracted_fields.map((field: any, index: number) => (
-                <div key={index} className="space-y-2">
-                  <Label className="font-semibold">{field.label}</Label>
-                  <p className="text-sm text-muted-foreground">
-                    {field.value || <em className="text-muted-foreground/60">Not filled</em>}
-                  </p>
-                </div>
-              ))
+          <div className="py-4">
+            {viewUrl ? (
+              selectedForm?.file_type?.startsWith("image/") ? (
+                <img
+                  src={viewUrl}
+                  alt={`Preview of ${selectedForm?.form_name}`}
+                  className="w-full h-auto rounded-md"
+                  loading="lazy"
+                />
+              ) : (
+                <iframe
+                  src={viewUrl}
+                  className="w-full h-[70vh] rounded-md border"
+                  title={selectedForm?.form_name}
+                />
+              )
             ) : (
-              <p className="text-muted-foreground text-center py-4">No fields extracted from this document</p>
+              <p className="text-muted-foreground text-center py-8">Loading preview...</p>
             )}
           </div>
           <div className="flex justify-end gap-2">
