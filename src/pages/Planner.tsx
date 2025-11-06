@@ -111,7 +111,10 @@ export default function Planner() {
     },
   });
 
-  const handleToggleComplete = (task: Task) => {
+  const handleToggleComplete = (id: string) => {
+    const task = tasks?.find(t => t.id === id);
+    if (!task) return;
+    
     updateTaskMutation.mutate({
       id: task.id,
       updates: { completed: !task.completed },
@@ -304,7 +307,10 @@ export default function Planner() {
         open={dialogOpen}
         onOpenChange={handleDialogClose}
         onSubmit={handleSubmit}
-        initialData={editingTask}
+        initialData={editingTask ? {
+          ...editingTask,
+          priority: editingTask.priority as "low" | "medium" | "high"
+        } : undefined}
         title={editingTask?.id ? "Edit Task" : "Create New Task"}
         description={editingTask?.id ? "Update task details" : "Add a new task to your planner"}
       />
