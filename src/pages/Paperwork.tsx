@@ -36,6 +36,18 @@ export default function Paperwork() {
     },
   });
 
+  const { data: personalInfo = [] } = useQuery({
+    queryKey: ["personal-info"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_personal_info")
+        .select("*");
+      
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const deleteFormMutation = useMutation({
     mutationFn: async (id: string) => {
       const form = forms.find(f => f.id === id);
@@ -127,13 +139,27 @@ export default function Paperwork() {
         toast({ variant: "destructive", title: "Scan issue", description: analysisError });
       }
 
-      // Show fields dialog only if we actually have fields
+      // Auto-fill from stored personal info
+      const autoFilledValues: Record<string, any> = {};
+      if (fields.length > 0) {
+        personalInfo.forEach((info: any) => {
+          const matchingField = fields.find((f: any) => f.name === info.field_name);
+          if (matchingField) {
+            autoFilledValues[info.field_name] = info.field_value;
+          }
+        });
+      }
+
+      // Show fields dialog if we have fields
       if (fields.length > 0) {
         const formWithFields = { ...insertedForm, extracted_fields: fields, status: nextStatus };
         setSelectedForm(formWithFields);
-        setFieldValues({});
+        setFieldValues(autoFilledValues);
         setShowFieldsDialog(true);
-        toast({ title: "Fields detected!", description: `Found ${fields.length} field(s) to fill in.` });
+        toast({ 
+          title: "Fields detected!", 
+          description: `Found ${fields.length} field(s) to fill in. ${Object.keys(autoFilledValues).length > 0 ? 'Some fields auto-filled!' : ''}` 
+        });
       } else {
         toast({ title: "Upload complete", description: "No fillable fields detected in this document." });
       }
@@ -151,12 +177,16 @@ export default function Paperwork() {
     if (!selectedForm) return;
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
       const updatedFields = selectedForm.extracted_fields.map((field: any) => ({
         ...field,
         value: fieldValues[field.name] || "",
       }));
 
-      const { error } = await supabase
+      // Save to forms table
+      const { error: formError } = await supabase
         .from("forms")
         .update({
           extracted_fields: updatedFields,
@@ -164,10 +194,28 @@ export default function Paperwork() {
         })
         .eq("id", selectedForm.id);
 
-      if (error) throw error;
+      if (formError) throw formError;
 
-      toast({ title: "Form fields saved successfully" });
+      // Save/update personal info for future auto-fill
+      for (const [fieldName, fieldValue] of Object.entries(fieldValues)) {
+        if (fieldValue && String(fieldValue).trim()) {
+          const { error: infoError } = await supabase
+            .from("user_personal_info")
+            .upsert({
+              user_id: user.id,
+              field_name: fieldName,
+              field_value: String(fieldValue),
+            }, {
+              onConflict: 'user_id,field_name'
+            });
+          
+          if (infoError) console.error('Error saving personal info:', infoError);
+        }
+      }
+
+      toast({ title: "Form completed!", description: "Your information has been saved for future forms." });
       queryClient.invalidateQueries({ queryKey: ["forms"] });
+      queryClient.invalidateQueries({ queryKey: ["personal-info"] });
       setShowFieldsDialog(false);
       setSelectedForm(null);
       setFieldValues({});

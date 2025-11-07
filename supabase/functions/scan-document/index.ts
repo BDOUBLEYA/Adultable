@@ -74,11 +74,14 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: `Analyze this document (image or PDF) carefully and extract all form fields that need to be filled out. Look for:
-- Labels followed by blank spaces, underlines, or boxes
-- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:")
-- Checkboxes and radio buttons
-- Any areas where information should be entered
+                text: `You are analyzing a document (image or PDF) to help a user fill it out. Extract ALL visible text and identify what information the user needs to provide.
+
+Look for:
+- Labels followed by blank spaces, underlines, boxes, or input areas
+- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:", "Phone:")
+- Checkboxes, radio buttons, and signature lines
+- Any areas where personal information should be entered
+- Common form fields like: full_name, first_name, last_name, date_of_birth, address, city, state, zip_code, phone, email, ssn, emergency_contact, employer, job_title
 
 Return ONLY a valid JSON array with this exact structure:
 [{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]
@@ -86,7 +89,7 @@ Return ONLY a valid JSON array with this exact structure:
 Available types: text, number, date, email, tel, checkbox
 Make field names lowercase with underscores (e.g., "first_name", "date_of_birth").
 
-If you cannot identify any fields, return an empty array: []`
+IMPORTANT: Be generous - if you see ANY text that suggests information needs to be filled in, include it as a field. Do not return an empty array unless the document has absolutely no fillable areas. Include common fields even if they're not explicitly labeled.`
               },
               {
                 type: "image_url",
