@@ -1,14 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { getDocument, GlobalWorkerOptions } from "https://esm.sh/pdfjs-dist@3.11.174/build/pdf.mjs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// Configure PDF.js worker (required in non-browser environments)
-GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.mjs";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -54,7 +50,7 @@ serve(async (req) => {
 
     console.log("File type:", mimeType, "Size:", arrayBuffer.byteLength);
 
-    // Support images and PDFs
+    // Support images and PDFs - Gemini 2.5 Pro can handle both
     if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf') {
       console.warn('Unsupported file type for automated scanning:', mimeType);
       return new Response(
@@ -63,34 +59,14 @@ serve(async (req) => {
       );
     }
 
-    // Build AI request body depending on file type
-    let aiBody: any;
-
-    if (mimeType === 'application/pdf') {
-      // Extract text from PDF using pdf.js (first 3 pages)
-      let extractedText = '';
-      try {
-        const loadingTask = getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
-        const maxPages = Math.min(pdf.numPages, 3);
-        for (let i = 1; i <= maxPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = (textContent.items as any[])
-            .map((it: any) => (typeof it?.str === 'string' ? it.str : ''))
-            .join(' ');
-          extractedText += pageText + "\n";
-        }
-      } catch (err) {
-        console.error('PDF text extraction failed:', err);
-        return new Response(
-          JSON.stringify({ fields: [], error: 'Failed to read PDF for scanning.' }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const trimmed = extractedText.slice(0, 20000);
-      aiBody = {
+    // Call Lovable AI to analyze the document (works for both images and PDFs)
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         model: "google/gemini-2.5-pro",
         messages: [
           {
@@ -98,23 +74,19 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: `Analyze the following text extracted from a PDF and detect fields a user must fill. Look for labels with colons (Name:, Date of Birth:), underlines, boxes, and common form prompts.\n\nReturn ONLY a valid JSON array with this exact structure:\n[{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]\n\nAvailable types: text, number, date, email, tel, checkbox. Use lowercase snake_case for names. If unsure, required=false. If no fields, return [].\n\nExtracted PDF text (partial):\n---\n${trimmed}\n---`
-              }
-            ]
-          }
-        ]
-      };
-    } else {
-      // Image path: send image directly
-      aiBody = {
-        model: "google/gemini-2.5-pro",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Analyze this document (image) carefully and extract all form fields that need to be filled out. Look for:\n- Labels followed by blank spaces, underlines, or boxes\n- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:")\n- Checkboxes and radio buttons\n- Any areas where information should be entered\n\nReturn ONLY a valid JSON array with this exact structure:\n[{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]\n\nAvailable types: text, number, date, email, tel, checkbox\nMake field names lowercase with underscores (e.g., "first_name", "date_of_birth").\n\nIf you cannot identify any fields, return an empty array: []`
+                text: `Analyze this document (image or PDF) carefully and extract all form fields that need to be filled out. Look for:
+- Labels followed by blank spaces, underlines, or boxes
+- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:")
+- Checkboxes and radio buttons
+- Any areas where information should be entered
+
+Return ONLY a valid JSON array with this exact structure:
+[{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]
+
+Available types: text, number, date, email, tel, checkbox
+Make field names lowercase with underscores (e.g., "first_name", "date_of_birth").
+
+If you cannot identify any fields, return an empty array: []`
               },
               {
                 type: "image_url",
@@ -124,17 +96,8 @@ serve(async (req) => {
               }
             ]
           }
-        ]
-      };
-    }
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(aiBody),
+        ],
+      }),
     });
 
     if (!response.ok) {
