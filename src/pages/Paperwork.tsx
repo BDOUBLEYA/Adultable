@@ -129,9 +129,13 @@ export default function Paperwork() {
 
       // Show fields dialog only if we actually have fields
       if (fields.length > 0) {
-        setSelectedForm({ ...insertedForm, extracted_fields: fields, id: insertedForm.id });
+        const formWithFields = { ...insertedForm, extracted_fields: fields, status: nextStatus };
+        setSelectedForm(formWithFields);
         setFieldValues({});
         setShowFieldsDialog(true);
+        toast({ title: "Fields detected!", description: `Found ${fields.length} field(s) to fill in.` });
+      } else {
+        toast({ title: "Upload complete", description: "No fillable fields detected in this document." });
       }
 
     } catch (error: any) {

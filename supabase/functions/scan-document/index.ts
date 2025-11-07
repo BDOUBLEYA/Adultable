@@ -50,11 +50,11 @@ serve(async (req) => {
 
     console.log("File type:", mimeType, "Size:", arrayBuffer.byteLength);
 
-    // If not an image, return gracefully with message (avoid 500s)
-    if (!mimeType.startsWith('image/')) {
+    // Support images and PDFs
+    if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf') {
       console.warn('Unsupported file type for automated scanning:', mimeType);
       return new Response(
-        JSON.stringify({ fields: [], error: 'This file type is not supported for automated scanning. Please upload an image (PNG/JPEG).' }),
+        JSON.stringify({ fields: [], error: 'This file type is not supported for automated scanning. Please upload an image (PNG/JPEG) or PDF.' }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -74,12 +74,16 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: `Analyze this document image carefully and extract all form fields that need to be filled out. Look for labels, input boxes, checkboxes, and any areas where information should be entered.
+                text: `Analyze this document (image or PDF) carefully and extract all form fields that need to be filled out. Look for:
+- Labels followed by blank spaces, underlines, or boxes
+- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:")
+- Checkboxes and radio buttons
+- Any areas where information should be entered
 
 Return ONLY a valid JSON array with this exact structure:
 [{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]
 
-Available types: text, number, date, email
+Available types: text, number, date, email, tel, checkbox
 Make field names lowercase with underscores (e.g., "first_name", "date_of_birth").
 
 If you cannot identify any fields, return an empty array: []`
