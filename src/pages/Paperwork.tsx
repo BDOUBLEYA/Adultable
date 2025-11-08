@@ -273,7 +273,7 @@ export default function Paperwork() {
             <Upload className="h-8 w-8 text-primary" />
           </div>
           <h3 className="text-lg font-semibold mb-2">Upload Your Forms</h3>
-          <p className="text-muted-foreground mb-4">Upload PDFs, images, and documents</p>
+          <p className="text-muted-foreground mb-4">Upload PDFs and images</p>
           <Button 
             className="shadow-soft" 
             disabled={uploading || scanning}
@@ -286,7 +286,7 @@ export default function Paperwork() {
             ref={fileInputRef}
             type="file" 
             className="hidden" 
-            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" 
+            accept=".pdf,.jpg,.jpeg,.png" 
             onChange={handleFileUpload} 
             disabled={uploading} 
           />

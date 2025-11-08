@@ -106,23 +106,34 @@ IMPORTANT: Be generous - if you see ANY text that suggests information needs to 
     if (!response.ok) {
       const text = await response.text();
       console.error("AI gateway error:", response.status, text);
+
+      const defaultFields = [
+        { name: "full_name", type: "text", label: "Full Name", required: true },
+        { name: "email", type: "email", label: "Email", required: false },
+        { name: "phone", type: "tel", label: "Phone", required: false },
+        { name: "address", type: "text", label: "Street Address", required: false },
+        { name: "city", type: "text", label: "City", required: false },
+        { name: "state", type: "text", label: "State", required: false },
+        { name: "zip_code", type: "text", label: "ZIP Code", required: false },
+      ];
+
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment.", fields: [] }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment.", fields: defaultFields }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI service requires payment. Please check your workspace usage.", fields: [] }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ error: "AI service requires payment. Please check your workspace usage.", fields: defaultFields }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-      // For other errors, return 200 with empty fields to avoid breaking the UI
-      return new Response(JSON.stringify({ fields: [], error: `AI analysis failed: ${text || 'Unknown error'}` }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // For other errors, return 200 with fallback fields to avoid breaking the UI
+      return new Response(
+        JSON.stringify({ fields: defaultFields, error: `AI analysis failed: ${text || "Unknown error"}` }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const data = await response.json();
@@ -147,7 +158,28 @@ IMPORTANT: Be generous - if you see ANY text that suggests information needs to 
       });
     }
 
-    console.log("Extracted fields:", fields);
+    // If no fields were found, fall back to a sensible default set so the UI can prompt the user
+    if (!Array.isArray(fields) || fields.length === 0) {
+      const defaultFields = [
+        { name: "full_name", type: "text", label: "Full Name", required: true },
+        { name: "first_name", type: "text", label: "First Name", required: false },
+        { name: "last_name", type: "text", label: "Last Name", required: false },
+        { name: "date_of_birth", type: "date", label: "Date of Birth", required: false },
+        { name: "email", type: "email", label: "Email", required: false },
+        { name: "phone", type: "tel", label: "Phone", required: false },
+        { name: "address", type: "text", label: "Street Address", required: false },
+        { name: "city", type: "text", label: "City", required: false },
+        { name: "state", type: "text", label: "State", required: false },
+        { name: "zip_code", type: "text", label: "ZIP Code", required: false },
+        { name: "emergency_contact", type: "text", label: "Emergency Contact", required: false },
+        { name: "employer", type: "text", label: "Employer", required: false },
+        { name: "job_title", type: "text", label: "Job Title", required: false },
+      ];
+      fields = defaultFields;
+      console.log("AI returned no fields, using fallback set.");
+    }
+
+    console.log("Extracted fields (final):", fields);
 
     return new Response(JSON.stringify({ fields }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
