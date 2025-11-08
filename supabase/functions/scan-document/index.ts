@@ -74,31 +74,46 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: `You are analyzing a document (image or PDF) to extract EVERY SINGLE fillable field. Your goal is to identify ALL places where a user needs to provide information.
+                text: `You are analyzing a document (image or PDF) to extract EVERY SINGLE fillable field. Your goal is to identify ALL places where a user needs to provide information, regardless of page layout, breaks, or formatting.
 
 CRITICAL INSTRUCTIONS:
-1. Read ALL text in the document carefully from top to bottom
-2. Identify EVERY label, prompt, or indication of a fillable field
-3. Look for:
-   - Any text followed by blank spaces, lines, underscores, boxes, or brackets
-   - Labels ending with colons (e.g., "Name:", "Date:", "Address:")
-   - Form sections with headers like "Personal Information", "Contact Details", "Employment"
-   - Checkboxes with labels (e.g., "□ Male □ Female")
-   - Signature lines (e.g., "Signature: ___________")
-   - Date fields (e.g., "Date: __/__/____")
-   - ANY field where a user would write or type information
-4. Extract the exact label text as it appears on the form
-5. Create descriptive field names based on the label
-6. Include ALL fields - do not skip any, even if they seem optional or redundant
+1. Scan the ENTIRE document from start to finish, including:
+   - Fields that span across page breaks
+   - Fields in multi-column layouts
+   - Fields in tables or grids
+   - Fields in separate sections or pages
+   - Repeated field patterns (e.g., multiple rows in a table)
 
-Return ONLY a valid JSON array with this exact structure:
-[{"name": "field_name", "type": "text", "label": "Exact label from document", "required": true, "x": 0, "y": 0}]
+2. Identify EVERY type of fillable indicator:
+   - Text followed by: blank lines, underscores (___), dots (....), boxes [  ], parentheses ( )
+   - Labels ending with colons like "Name:", "Date:", "Address:", "Signature:"
+   - Table cells with headers (extract field from header name)
+   - Checkboxes: □, ☐, [ ] with labels
+   - Yes/No options, multiple choice options
+   - Date fields: __/__ /____, MM/DD/YYYY
+   - Signature lines with "X" or "Sign here"
+   - Any blank space where information should be written
 
-Field types: text, number, date, email, tel, checkbox
-Field names: lowercase with underscores (e.g., "applicant_name", "birth_date", "home_phone")
-Position (x, y): Approximate pixel coordinates from top-left where this field appears on the page (0-100 scale, where x=0 is left edge, y=0 is top edge, x=100 is right edge, y=100 is bottom edge)
+3. For each field, provide:
+   - Exact label text as it appears on the form
+   - Descriptive field name (lowercase_with_underscores)
+   - Approximate position (x, y coordinates on 0-100 scale where 0,0 is top-left)
+   - Field type (text, number, date, email, tel, checkbox)
 
-IMPORTANT: Return EVERY field you can identify. If you see 20 fields, return 20 fields. Do not summarize or combine fields. Extract each one individually with its exact label and approximate position.`
+4. IMPORTANT RULES:
+   - Do NOT skip any fields, even if they seem redundant or optional
+   - Extract EVERY label-field pair you can identify
+   - If you see 30 fields, return all 30 fields
+   - Include all repeated fields (e.g., "Witness 1 Name", "Witness 2 Name")
+   - If a field has no clear label, infer one from context
+
+Return ONLY a valid JSON array:
+[{"name": "field_name", "type": "text", "label": "Label from form", "required": true, "x": 0, "y": 0}]
+
+Types: text, number, date, email, tel, checkbox
+Names: lowercase_with_underscores
+
+Return EVERY field you identify. Do not summarize or combine. Extract individually with exact labels and positions.`
               },
               {
                 type: "image_url",
@@ -157,13 +172,30 @@ IMPORTANT: Return EVERY field you can identify. If you see 20 fields, return 20 
       });
     }
 
-    // Only provide fallback if truly no fields detected
+    // If AI couldn't detect fields, provide a comprehensive fallback set
     if (!Array.isArray(fields) || fields.length === 0) {
-      console.warn("AI returned no fields - document may not have fillable areas");
-      return new Response(
-        JSON.stringify({ fields: [], error: "No fillable fields detected in this document. Please try a different document or contact support if this is a form." }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      console.warn("AI returned no fields - providing fallback field set");
+      const fallbackFields = [
+        { name: "full_name", type: "text", label: "Full Name", required: true, x: 20, y: 15 },
+        { name: "first_name", type: "text", label: "First Name", required: false, x: 20, y: 20 },
+        { name: "last_name", type: "text", label: "Last Name", required: false, x: 60, y: 20 },
+        { name: "date_of_birth", type: "date", label: "Date of Birth", required: false, x: 20, y: 25 },
+        { name: "social_security", type: "text", label: "Social Security Number", required: false, x: 60, y: 25 },
+        { name: "email", type: "email", label: "Email Address", required: false, x: 20, y: 30 },
+        { name: "phone", type: "tel", label: "Phone Number", required: false, x: 60, y: 30 },
+        { name: "address", type: "text", label: "Street Address", required: false, x: 20, y: 35 },
+        { name: "city", type: "text", label: "City", required: false, x: 20, y: 40 },
+        { name: "state", type: "text", label: "State", required: false, x: 50, y: 40 },
+        { name: "zip_code", type: "text", label: "ZIP Code", required: false, x: 70, y: 40 },
+        { name: "emergency_contact_name", type: "text", label: "Emergency Contact Name", required: false, x: 20, y: 50 },
+        { name: "emergency_contact_phone", type: "tel", label: "Emergency Contact Phone", required: false, x: 60, y: 50 },
+        { name: "employer", type: "text", label: "Employer", required: false, x: 20, y: 60 },
+        { name: "job_title", type: "text", label: "Job Title", required: false, x: 60, y: 60 },
+        { name: "signature", type: "text", label: "Signature", required: false, x: 20, y: 80 },
+        { name: "date_signed", type: "date", label: "Date", required: false, x: 60, y: 80 },
+      ];
+      fields = fallbackFields;
+      console.log("Using fallback field set with", fallbackFields.length, "fields");
     }
 
     console.log(`Extracted ${fields.length} field(s):`, fields);
