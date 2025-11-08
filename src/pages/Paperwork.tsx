@@ -213,7 +213,30 @@ export default function Paperwork() {
         }
       }
 
-      toast({ title: "Form completed!", description: "Your information has been saved for future forms." });
+      // If it's a PDF, fill it with the values
+      if (selectedForm.file_type === "application/pdf") {
+        toast({ title: "Generating filled PDF...", description: "Please wait while we place your answers on the document." });
+        
+        const { data: fillResult, error: fillError } = await supabase.functions.invoke("fill-document", {
+          body: { fileUrl: selectedForm.file_url, fields: updatedFields },
+        });
+
+        if (fillError) {
+          console.error("Error filling document:", fillError);
+          toast({ variant: "destructive", title: "Could not generate filled PDF", description: "Your data was saved but the filled PDF could not be generated." });
+        } else if (fillResult?.filledFileUrl) {
+          // Update the form with the filled file URL
+          await supabase
+            .from("forms")
+            .update({ file_url: fillResult.filledFileUrl })
+            .eq("id", selectedForm.id);
+          
+          toast({ title: "Form completed!", description: "Your answers have been placed on the document. Download to view the filled form." });
+        }
+      } else {
+        toast({ title: "Form completed!", description: "Your information has been saved for future forms." });
+      }
+
       queryClient.invalidateQueries({ queryKey: ["forms"] });
       queryClient.invalidateQueries({ queryKey: ["personal-info"] });
       setShowFieldsDialog(false);

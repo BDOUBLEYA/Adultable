@@ -74,22 +74,31 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: `You are analyzing a document (image or PDF) to help a user fill it out. Extract ALL visible text and identify what information the user needs to provide.
+                text: `You are analyzing a document (image or PDF) to extract EVERY SINGLE fillable field. Your goal is to identify ALL places where a user needs to provide information.
 
-Look for:
-- Labels followed by blank spaces, underlines, boxes, or input areas
-- Text ending with colons (e.g., "Name:", "Date of Birth:", "Address:", "Phone:")
-- Checkboxes, radio buttons, and signature lines
-- Any areas where personal information should be entered
-- Common form fields like: full_name, first_name, last_name, date_of_birth, address, city, state, zip_code, phone, email, ssn, emergency_contact, employer, job_title
+CRITICAL INSTRUCTIONS:
+1. Read ALL text in the document carefully from top to bottom
+2. Identify EVERY label, prompt, or indication of a fillable field
+3. Look for:
+   - Any text followed by blank spaces, lines, underscores, boxes, or brackets
+   - Labels ending with colons (e.g., "Name:", "Date:", "Address:")
+   - Form sections with headers like "Personal Information", "Contact Details", "Employment"
+   - Checkboxes with labels (e.g., "□ Male □ Female")
+   - Signature lines (e.g., "Signature: ___________")
+   - Date fields (e.g., "Date: __/__/____")
+   - ANY field where a user would write or type information
+4. Extract the exact label text as it appears on the form
+5. Create descriptive field names based on the label
+6. Include ALL fields - do not skip any, even if they seem optional or redundant
 
 Return ONLY a valid JSON array with this exact structure:
-[{"name": "field_name", "type": "text", "label": "Human readable label", "required": true}]
+[{"name": "field_name", "type": "text", "label": "Exact label from document", "required": true, "x": 0, "y": 0}]
 
-Available types: text, number, date, email, tel, checkbox
-Make field names lowercase with underscores (e.g., "first_name", "date_of_birth").
+Field types: text, number, date, email, tel, checkbox
+Field names: lowercase with underscores (e.g., "applicant_name", "birth_date", "home_phone")
+Position (x, y): Approximate pixel coordinates from top-left where this field appears on the page (0-100 scale, where x=0 is left edge, y=0 is top edge, x=100 is right edge, y=100 is bottom edge)
 
-IMPORTANT: Be generous - if you see ANY text that suggests information needs to be filled in, include it as a field. Do not return an empty array unless the document has absolutely no fillable areas. Include common fields even if they're not explicitly labeled.`
+IMPORTANT: Return EVERY field you can identify. If you see 20 fields, return 20 fields. Do not summarize or combine fields. Extract each one individually with its exact label and approximate position.`
               },
               {
                 type: "image_url",
@@ -107,31 +116,21 @@ IMPORTANT: Be generous - if you see ANY text that suggests information needs to 
       const text = await response.text();
       console.error("AI gateway error:", response.status, text);
 
-      const defaultFields = [
-        { name: "full_name", type: "text", label: "Full Name", required: true },
-        { name: "email", type: "email", label: "Email", required: false },
-        { name: "phone", type: "tel", label: "Phone", required: false },
-        { name: "address", type: "text", label: "Street Address", required: false },
-        { name: "city", type: "text", label: "City", required: false },
-        { name: "state", type: "text", label: "State", required: false },
-        { name: "zip_code", type: "text", label: "ZIP Code", required: false },
-      ];
-
       if (response.status === 429) {
         return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment.", fields: defaultFields }),
+          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment.", fields: [] }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (response.status === 402) {
         return new Response(
-          JSON.stringify({ error: "AI service requires payment. Please check your workspace usage.", fields: defaultFields }),
+          JSON.stringify({ error: "AI service requires payment. Please check your workspace usage.", fields: [] }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      // For other errors, return 200 with fallback fields to avoid breaking the UI
+      // For other errors, return 200 with empty fields
       return new Response(
-        JSON.stringify({ fields: defaultFields, error: `AI analysis failed: ${text || "Unknown error"}` }),
+        JSON.stringify({ fields: [], error: `AI analysis failed: ${text || "Unknown error"}` }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -158,28 +157,16 @@ IMPORTANT: Be generous - if you see ANY text that suggests information needs to 
       });
     }
 
-    // If no fields were found, fall back to a sensible default set so the UI can prompt the user
+    // Only provide fallback if truly no fields detected
     if (!Array.isArray(fields) || fields.length === 0) {
-      const defaultFields = [
-        { name: "full_name", type: "text", label: "Full Name", required: true },
-        { name: "first_name", type: "text", label: "First Name", required: false },
-        { name: "last_name", type: "text", label: "Last Name", required: false },
-        { name: "date_of_birth", type: "date", label: "Date of Birth", required: false },
-        { name: "email", type: "email", label: "Email", required: false },
-        { name: "phone", type: "tel", label: "Phone", required: false },
-        { name: "address", type: "text", label: "Street Address", required: false },
-        { name: "city", type: "text", label: "City", required: false },
-        { name: "state", type: "text", label: "State", required: false },
-        { name: "zip_code", type: "text", label: "ZIP Code", required: false },
-        { name: "emergency_contact", type: "text", label: "Emergency Contact", required: false },
-        { name: "employer", type: "text", label: "Employer", required: false },
-        { name: "job_title", type: "text", label: "Job Title", required: false },
-      ];
-      fields = defaultFields;
-      console.log("AI returned no fields, using fallback set.");
+      console.warn("AI returned no fields - document may not have fillable areas");
+      return new Response(
+        JSON.stringify({ fields: [], error: "No fillable fields detected in this document. Please try a different document or contact support if this is a form." }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    console.log("Extracted fields (final):", fields);
+    console.log(`Extracted ${fields.length} field(s):`, fields);
 
     return new Response(JSON.stringify({ fields }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
