@@ -10,6 +10,11 @@ import { format } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.js?url";
+
+// Configure PDF.js worker
+GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export default function Paperwork() {
   const [uploading, setUploading] = useState(false);
@@ -105,10 +110,40 @@ export default function Paperwork() {
       toast({ title: "Form uploaded successfully" });
       queryClient.invalidateQueries({ queryKey: ["forms"] });
 
-      // Scan the document
+      // Scan the document - render to high-res images first for reliable detection
       setScanning(true);
+
+      let images: string[] = [];
+      try {
+        if (file.type === "application/pdf") {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await getDocument({ data: arrayBuffer }).promise;
+          const scale = 4.1667; // ~300 DPI from 72 DPI
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Canvas 2D not supported");
+            canvas.width = Math.floor(viewport.width);
+            canvas.height = Math.floor(viewport.height);
+            await page.render({ canvasContext: ctx as any, viewport, canvas }).promise;
+            images.push(canvas.toDataURL("image/png", 1.0));
+          }
+        } else if (file.type.startsWith("image/")) {
+          images = [await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          })];
+        }
+      } catch (renderErr: any) {
+        console.error("PDF rendering error:", renderErr);
+      }
+
       const { data: scanResult, error: scanError } = await supabase.functions.invoke("scan-document", {
-        body: { fileUrl: fileName, fileName: file.name },
+        body: { fileUrl: fileName, fileName: file.name, images },
       });
 
       // Handle invoke/network errors
