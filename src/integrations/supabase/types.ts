@@ -41,6 +41,59 @@ export type Database = {
         }
         Relationships: []
       }
+      form_fields: {
+        Row: {
+          bbox: Json | null
+          confidence: number | null
+          created_at: string
+          field_key: string
+          field_label: string | null
+          form_id: string
+          id: string
+          page: number
+          source: string | null
+          updated_at: string
+          user_id: string
+          value: string | null
+        }
+        Insert: {
+          bbox?: Json | null
+          confidence?: number | null
+          created_at?: string
+          field_key: string
+          field_label?: string | null
+          form_id: string
+          id?: string
+          page?: number
+          source?: string | null
+          updated_at?: string
+          user_id: string
+          value?: string | null
+        }
+        Update: {
+          bbox?: Json | null
+          confidence?: number | null
+          created_at?: string
+          field_key?: string
+          field_label?: string | null
+          form_id?: string
+          id?: string
+          page?: number
+          source?: string | null
+          updated_at?: string
+          user_id?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_fields_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       forms: {
         Row: {
           created_at: string
@@ -48,8 +101,10 @@ export type Database = {
           file_size: number | null
           file_type: string | null
           file_url: string
+          filled_file_url: string | null
           form_name: string
           id: string
+          layout_hash: string | null
           status: string
           updated_at: string
           user_id: string
@@ -60,8 +115,10 @@ export type Database = {
           file_size?: number | null
           file_type?: string | null
           file_url: string
+          filled_file_url?: string | null
           form_name: string
           id?: string
+          layout_hash?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -72,8 +129,10 @@ export type Database = {
           file_size?: number | null
           file_type?: string | null
           file_url?: string
+          filled_file_url?: string | null
           form_name?: string
           id?: string
+          layout_hash?: string | null
           status?: string
           updated_at?: string
           user_id?: string
