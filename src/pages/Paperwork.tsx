@@ -11,9 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.js?url";
 
-// Configure PDF.js worker with CDN
-GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+// Configure PDF.js worker (match installed version)
+GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export default function Paperwork() {
   const [uploading, setUploading] = useState(false);
@@ -102,7 +103,7 @@ export default function Paperwork() {
         if (file.type === "application/pdf") {
           const arrayBuffer = await file.arrayBuffer();
           const pdf = await getDocument({ data: arrayBuffer }).promise;
-          const scale = 4.1667; // ~300 DPI from 72 DPI
+          const scale = 2.5; // ~180 DPI equivalent, keeps images lighter
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const viewport = page.getViewport({ scale });
@@ -112,7 +113,7 @@ export default function Paperwork() {
             canvas.width = Math.floor(viewport.width);
             canvas.height = Math.floor(viewport.height);
             await page.render({ canvasContext: ctx as any, viewport, canvas }).promise;
-            images.push(canvas.toDataURL("image/png", 1.0));
+            images.push(canvas.toDataURL("image/jpeg", 0.85));
           }
         } else if (file.type.startsWith("image/")) {
           images = [await new Promise<string>((resolve, reject) => {
