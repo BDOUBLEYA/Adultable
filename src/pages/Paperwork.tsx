@@ -11,10 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.js?url";
 
-// Configure PDF.js worker (match installed version)
-GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Configure PDF.js worker with CDN
+GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.394/pdf.worker.min.js`;
 
 export default function Paperwork() {
   const [uploading, setUploading] = useState(false);
