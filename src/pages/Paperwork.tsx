@@ -36,19 +36,7 @@ export default function Paperwork() {
         .order("created_at", { ascending: false });
       
       if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: personalInfo = [] } = useQuery({
-    queryKey: ["personal-info"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_personal_info")
-        .select("*");
-      
-      if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
@@ -79,11 +67,8 @@ export default function Paperwork() {
     setUploading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
       const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      const fileName = `${Date.now()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
         .from("forms")
@@ -94,7 +79,6 @@ export default function Paperwork() {
       const { data: insertedForm, error: dbError } = await supabase
         .from("forms")
         .insert({
-          user_id: user.id,
           file_url: fileName,
           form_name: file.name,
           file_type: file.type,
@@ -102,9 +86,10 @@ export default function Paperwork() {
           status: "processing",
         })
         .select()
-        .single();
+        .maybeSingle();
 
       if (dbError) throw dbError;
+      if (!insertedForm) throw new Error("Failed to create form record");
 
       toast({ title: "Form uploaded successfully" });
       queryClient.invalidateQueries({ queryKey: ["forms"] });
@@ -173,26 +158,15 @@ export default function Paperwork() {
         toast({ variant: "destructive", title: "Scan issue", description: analysisError });
       }
 
-      // Auto-fill from stored personal info
-      const autoFilledValues: Record<string, any> = {};
-      if (fields.length > 0) {
-        personalInfo.forEach((info: any) => {
-          const matchingField = fields.find((f: any) => f.name === info.field_name);
-          if (matchingField) {
-            autoFilledValues[info.field_name] = info.field_value;
-          }
-        });
-      }
-
       // Show fields dialog if we have fields
       if (fields.length > 0) {
         const formWithFields = { ...insertedForm, extracted_fields: fields, status: nextStatus };
         setSelectedForm(formWithFields);
-        setFieldValues(autoFilledValues);
+        setFieldValues({});
         setShowFieldsDialog(true);
         toast({ 
           title: "Fields detected!", 
-          description: `Found ${fields.length} field(s) to fill in. ${Object.keys(autoFilledValues).length > 0 ? 'Some fields auto-filled!' : ''}` 
+          description: `Found ${fields.length} field(s)` 
         });
       } else {
         toast({ title: "Upload complete", description: "No fillable fields detected in this document." });
@@ -211,9 +185,6 @@ export default function Paperwork() {
     if (!selectedForm) return;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
       const updatedFields = selectedForm.extracted_fields.map((field: any) => ({
         ...field,
         value: fieldValues[field.name] || "",
@@ -229,23 +200,6 @@ export default function Paperwork() {
         .eq("id", selectedForm.id);
 
       if (formError) throw formError;
-
-      // Save/update personal info for future auto-fill
-      for (const [fieldName, fieldValue] of Object.entries(fieldValues)) {
-        if (fieldValue && String(fieldValue).trim()) {
-          const { error: infoError } = await supabase
-            .from("user_personal_info")
-            .upsert({
-              user_id: user.id,
-              field_name: fieldName,
-              field_value: String(fieldValue),
-            }, {
-              onConflict: 'user_id,field_name'
-            });
-          
-          if (infoError) console.error('Error saving personal info:', infoError);
-        }
-      }
 
       // If it's a PDF, fill it with the values
       if (selectedForm.file_type === "application/pdf") {
@@ -272,7 +226,6 @@ export default function Paperwork() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["forms"] });
-      queryClient.invalidateQueries({ queryKey: ["personal-info"] });
       setShowFieldsDialog(false);
       setSelectedForm(null);
       setFieldValues({});
@@ -320,8 +273,8 @@ export default function Paperwork() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Paperwork Assistant</h1>
-        <p className="text-muted-foreground">Upload and manage your forms</p>
+        <h1 className="text-3xl font-bold mb-2">Document Scanner</h1>
+        <p className="text-muted-foreground">Upload PDFs or images to extract text and detect form fields</p>
       </div>
 
       <Card className="shadow-card border-2 border-dashed">

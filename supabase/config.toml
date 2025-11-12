@@ -1,1 +1,7 @@
 project_id = "vffoanrxywflacaffryc"
+
+[functions.scan-document]
+verify_jwt = false
+
+[functions.fill-document]
+verify_jwt = false

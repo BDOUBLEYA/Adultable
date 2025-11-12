@@ -53,7 +53,7 @@ export type Database = {
           page: number
           source: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
           value: string | null
         }
         Insert: {
@@ -67,7 +67,7 @@ export type Database = {
           page?: number
           source?: string | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
           value?: string | null
         }
         Update: {
@@ -81,7 +81,7 @@ export type Database = {
           page?: number
           source?: string | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
           value?: string | null
         }
         Relationships: [
@@ -107,7 +107,7 @@ export type Database = {
           layout_hash: string | null
           status: string
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string
@@ -121,7 +121,7 @@ export type Database = {
           layout_hash?: string | null
           status?: string
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string
@@ -135,7 +135,7 @@ export type Database = {
           layout_hash?: string | null
           status?: string
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {

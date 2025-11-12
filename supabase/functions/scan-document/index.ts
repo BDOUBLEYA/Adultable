@@ -203,13 +203,13 @@ QUALITY:
     // Persist to DB if we have a matching form
     if (formRow?.id && normalized.length > 0) {
       const formId = formRow.id as string;
-      const userId = formRow.user_id as string;
+      const userId = formRow.user_id as string | null;
 
       // Replace existing detected fields for this form
       const { error: delErr } = await supabase.from('form_fields').delete().eq('form_id', formId);
       if (delErr) console.warn('Failed to clear existing form_fields:', delErr.message);
 
-      // Bulk insert
+      // Bulk insert (user_id can be null for public scans)
       const payload = normalized.map((f) => ({
         form_id: formId,
         user_id: userId,
