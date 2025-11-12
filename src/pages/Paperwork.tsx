@@ -1,398 +1,282 @@
-import React, { useState } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { FileText, Upload, Download, Trash2, Eye, Edit } from "lucide-react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+"use client";
 
-// Configure PDF.js worker with CDN
-GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.394/pdf.worker.min.js`;
+import React, { useState, useEffect, useCallback } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import worker from "pdfjs-dist/build/pdf.worker.entry";
+import { createClient } from "@supabase/supabase-js";
+import Tesseract from "tesseract.js";
+import { v4 as uuidv4 } from "uuid";
 
-export default function Paperwork() {
-  const [uploading, setUploading] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [selectedForm, setSelectedForm] = useState<any>(null);
-  const [showFieldsDialog, setShowFieldsDialog] = useState(false);
-  const [showViewDialog, setShowViewDialog] = useState(false);
-  const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
-  const [viewUrl, setViewUrl] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
 
-  const { data: forms = [], isLoading } = useQuery({
-    queryKey: ["forms"],
-    queryFn: async () => {
-      const { data, error } = await supabase
+// Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+interface Field {
+  field_name: string;
+  field_type: string;
+  field_value?: string;
+  field_position?: string;
+}
+
+interface FormRecord {
+  id: string;
+  user_id: string;
+  file_name: string;
+  file_url: string;
+  fields: Field[];
+  created_at: string;
+}
+
+const PaperworkAssistant: React.FC = () => {
+  const [file, setFile] = useState<File | null>(null);
+  const [scannedFields, setScannedFields] = useState<Field[]>([]);
+  const [knownData, setKnownData] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [forms, setForms] = useState<FormRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load stored forms + known data on mount
+  useEffect(() => {
+    (async () => {
+      const user = (await supabase.auth.getUser()).data.user;
+      if (!user) return;
+
+      const { data: formData } = await supabase
         .from("forms")
         .select("*")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
-      
-      if (error) throw error;
-      return data || [];
-    },
-  });
 
-  const deleteFormMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const form = forms.find(f => f.id === id);
-      if (form) {
-        const { error: storageError } = await supabase.storage
-          .from("forms")
-          .remove([form.file_url]);
-        
-        if (storageError) throw storageError;
-      }
+      const { data: userInfo } = await supabase
+        .from("user_personal_info")
+        .select("field_name, field_value")
+        .eq("user_id", user.id);
 
-      const { error } = await supabase.from("forms").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["forms"] });
-      toast({ title: "Form deleted successfully" });
-    },
-  });
+      const stored = userInfo?.reduce((acc, curr) => {
+        acc[curr.field_name] = curr.field_value;
+        return acc;
+      }, {} as Record<string, string>);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+      setKnownData(stored || {});
+      setForms(formData || []);
+    })();
+  }, []);
+
+  // Handle file upload
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files?.length) return;
+    setFile(event.target.files[0]);
+  };
+
+  // Parse PDF text or image with OCR
+  const processFile = useCallback(async () => {
     if (!file) return;
-
-    setUploading(true);
+    setLoading(true);
+    setError(null);
 
     try {
+      const user = (await supabase.auth.getUser()).data.user;
+      if (!user) throw new Error("No authenticated user found");
+
       const fileExt = file.name.split(".").pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
+      const fileName = `${user.id}/${uuidv4()}.${fileExt}`;
+
+      // Upload file to Supabase storage
+      const { error: uploadErr } = await supabase.storage
         .from("forms")
         .upload(fileName, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadErr) throw uploadErr;
 
-      const { data: insertedForm, error: dbError } = await supabase
+      const { data: urlData } = supabase.storage
         .from("forms")
-        .insert({
-          file_url: fileName,
-          form_name: file.name,
-          file_type: file.type,
-          file_size: file.size,
-          status: "processing",
-        })
-        .select()
-        .maybeSingle();
+        .getPublicUrl(fileName);
 
-      if (dbError) throw dbError;
-      if (!insertedForm) throw new Error("Failed to create form record");
+      const fileUrl = urlData.publicUrl;
 
-      toast({ title: "Form uploaded successfully" });
-      queryClient.invalidateQueries({ queryKey: ["forms"] });
+      let textContent = "";
 
-      // Scan the document - render to high-res images first for reliable detection
-      setScanning(true);
+      if (file.type === "application/pdf") {
+        // Extract text from PDF pages
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let allText = "";
 
-      let images: string[] = [];
-      try {
-        if (file.type === "application/pdf") {
-          const arrayBuffer = await file.arrayBuffer();
-          const pdf = await getDocument({ data: arrayBuffer }).promise;
-          const scale = 2.5; // ~180 DPI equivalent, keeps images lighter
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement("canvas");
-            const ctx = canvas.getContext("2d");
-            if (!ctx) throw new Error("Canvas 2D not supported");
-            canvas.width = Math.floor(viewport.width);
-            canvas.height = Math.floor(viewport.height);
-            await page.render({ canvasContext: ctx as any, viewport, canvas }).promise;
-            images.push(canvas.toDataURL("image/jpeg", 0.85));
-          }
-        } else if (file.type.startsWith("image/")) {
-          images = [await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          })];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          allText += content.items.map((item: any) => item.str).join(" ");
         }
-      } catch (renderErr: any) {
-        console.error("PDF rendering error:", renderErr);
-      }
 
-      const { data: scanResult, error: scanError } = await supabase.functions.invoke("scan-document", {
-        body: { fileUrl: fileName, fileName: file.name, images },
-      });
-
-      // Handle invoke/network errors
-      if (scanError) {
-        console.error('scan-document invoke error:', scanError);
-        await supabase.from("forms").update({ status: "uploaded" }).eq("id", insertedForm.id);
-        throw scanError;
-      }
-
-      const fields = Array.isArray(scanResult?.fields) ? scanResult.fields : [];
-      const analysisError = scanResult?.error as string | undefined;
-
-      // Update form with extracted fields (or empty) and status
-      const nextStatus = fields.length > 0 ? "scanned" : "uploaded";
-      const { error: updateError } = await supabase
-        .from("forms")
-        .update({
-          extracted_fields: fields,
-          status: nextStatus,
-        })
-        .eq("id", insertedForm.id);
-
-      if (updateError) throw updateError;
-
-      queryClient.invalidateQueries({ queryKey: ["forms"] });
-
-      if (analysisError) {
-        toast({ variant: "destructive", title: "Scan issue", description: analysisError });
-      }
-
-      // Show fields dialog if we have fields
-      if (fields.length > 0) {
-        const formWithFields = { ...insertedForm, extracted_fields: fields, status: nextStatus };
-        setSelectedForm(formWithFields);
-        setFieldValues({});
-        setShowFieldsDialog(true);
-        toast({ 
-          title: "Fields detected!", 
-          description: `Found ${fields.length} field(s)` 
-        });
+        textContent = allText;
+      } else if (file.type.startsWith("image/")) {
+        // OCR for images
+        const result = await Tesseract.recognize(file, "eng");
+        textContent = result.data.text;
       } else {
-        toast({ title: "Upload complete", description: "No fillable fields detected in this document." });
+        throw new Error("Unsupported file type");
       }
 
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    } finally {
-      setUploading(false);
-      setScanning(false);
-      e.target.value = "";
-    }
-  };
+      // Send text to Supabase Edge Function for field detection
+      const { data: scanResult, error: scanErr } = await supabase.functions.invoke(
+        "scan-document",
+        {
+          body: { text: textContent },
+        }
+      );
 
-  const handleSaveFields = async () => {
-    if (!selectedForm) return;
+      if (scanErr) throw scanErr;
 
-    try {
-      const updatedFields = selectedForm.extracted_fields.map((field: any) => ({
-        ...field,
-        value: fieldValues[field.name] || "",
+      const detectedFields: Field[] =
+        scanResult?.data?.fields ||
+        scanResult?.fields ||
+        extractFallbackFields(textContent);
+
+      // Fill known data where available
+      const autofilledFields = detectedFields.map((f) => ({
+        ...f,
+        field_value: knownData[f.field_name] || "",
       }));
 
-      // Save to forms table
-      const { error: formError } = await supabase
+      setScannedFields(autofilledFields);
+
+      // Insert record in forms table
+      const { data: insertData, error: insertErr } = await supabase
         .from("forms")
-        .update({
-          extracted_fields: updatedFields,
-          status: "completed",
-        })
-        .eq("id", selectedForm.id);
+        .insert([
+          {
+            id: uuidv4(),
+            user_id: user.id,
+            file_name: file.name,
+            file_url: fileUrl,
+            fields: autofilledFields,
+          },
+        ])
+        .select()
+        .single();
 
-      if (formError) throw formError;
-
-      // If it's a PDF, fill it with the values
-      if (selectedForm.file_type === "application/pdf") {
-        toast({ title: "Generating filled PDF...", description: "Please wait while we place your answers on the document." });
-        
-        const { data: fillResult, error: fillError } = await supabase.functions.invoke("fill-document", {
-          body: { fileUrl: selectedForm.file_url, fields: updatedFields },
-        });
-
-        if (fillError) {
-          console.error("Error filling document:", fillError);
-          toast({ variant: "destructive", title: "Could not generate filled PDF", description: "Your data was saved but the filled PDF could not be generated." });
-        } else if (fillResult?.filledFileUrl) {
-          // Update the form with the filled file URL
-          await supabase
-            .from("forms")
-            .update({ file_url: fillResult.filledFileUrl })
-            .eq("id", selectedForm.id);
-          
-          toast({ title: "Form completed!", description: "Your answers have been placed on the document. Download to view the filled form." });
-        }
-      } else {
-        toast({ title: "Form completed!", description: "Your information has been saved for future forms." });
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["forms"] });
-      setShowFieldsDialog(false);
-      setSelectedForm(null);
-      setFieldValues({});
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
+      if (insertErr) throw insertErr;
+      if (insertData) setForms((prev) => [insertData, ...prev]);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
+  }, [file, knownData]);
+
+  // Fallback field extraction (regex-based)
+  const extractFallbackFields = (text: string): Field[] => {
+    const matches = text.match(/([A-Z][A-Za-z ]{2,20}):/g) || [];
+    return matches.map((m) => ({
+      field_name: m.replace(":", "").trim(),
+      field_type: "text",
+    }));
   };
 
-  const handleViewForm = async (form: any) => {
-    try {
-      setSelectedForm(form);
-      const { data: signed, error } = await supabase.storage
-        .from("forms")
-        .createSignedUrl(form.file_url, 300);
-      if (error) throw error;
-      setViewUrl(signed?.signedUrl || null);
-      setShowViewDialog(true);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    }
+  // Save updated fields + user info
+  const saveFields = async () => {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+
+    await Promise.all(
+      scannedFields.map(async (field) => {
+        if (!field.field_value) return;
+        await supabase
+          .from("user_personal_info")
+          .upsert(
+            {
+              user_id: user.id,
+              field_name: field.field_name,
+              field_value: field.field_value,
+            },
+            { onConflict: "user_id,field_name" }
+          )
+          .select();
+      })
+    );
+
+    alert("Saved successfully!");
   };
-
-  const handleDownload = async (form: any) => {
-    try {
-      const { data, error } = await supabase.storage.from("forms").download(form.file_url);
-      if (error) throw error;
-
-      const url = URL.createObjectURL(data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = form.form_name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-    }
-  };
-
-  if (isLoading) {
-    return <div className="flex items-center justify-center min-h-[400px]"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>;
-  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Document Scanner</h1>
-        <p className="text-muted-foreground">Upload PDFs or images to extract text and detect form fields</p>
-      </div>
+    <div className="p-4 bg-white shadow rounded-lg">
+      <h2 className="text-xl font-semibold mb-4">📄 Paperwork Assistant</h2>
 
-      <Card className="shadow-card border-2 border-dashed">
-        <CardContent className="pt-6 text-center py-12">
-          <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-            <Upload className="h-8 w-8 text-primary" />
-          </div>
-          <h3 className="text-lg font-semibold mb-2">Upload Your Forms</h3>
-          <p className="text-muted-foreground mb-4">Upload PDFs and images</p>
-          <Button 
-            className="shadow-soft" 
-            disabled={uploading || scanning}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            {uploading ? "Uploading..." : scanning ? "Scanning..." : "Choose Files"}
-          </Button>
-          <input 
-            ref={fileInputRef}
-            type="file" 
-            className="hidden" 
-            accept=".pdf,.jpg,.jpeg,.png" 
-            onChange={handleFileUpload} 
-            disabled={uploading} 
-          />
-        </CardContent>
-      </Card>
+      <input
+        type="file"
+        accept=".pdf, image/*"
+        onChange={handleFileUpload}
+        className="mb-2"
+      />
 
-      {forms.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {forms.map((form) => (
-            <Card key={form.id} className="shadow-card">
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <FileText className="h-8 w-8 text-primary" />
-                  <Badge variant="outline">{form.status}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <h3 className="font-medium mb-2 truncate">{form.form_name}</h3>
-                <p className="text-xs text-muted-foreground mb-4">Uploaded {format(new Date(form.created_at), "MMM d, yyyy")}</p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleViewForm(form)}><Eye className="h-4 w-4" /></Button>
-                  <Button variant="outline" size="sm" onClick={() => handleDownload(form)}><Download className="h-4 w-4" /></Button>
-                  {form.status !== "completed" && Array.isArray(form.extracted_fields) && form.extracted_fields.length > 0 && (
-                    <Button variant="outline" size="sm" onClick={() => { setSelectedForm(form); setFieldValues({}); setShowFieldsDialog(true); }}><Edit className="h-4 w-4" /></Button>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => confirm("Delete?") && deleteFormMutation.mutate(form.id)}><Trash2 className="h-4 w-4" /></Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <button
+        onClick={processFile}
+        disabled={!file || loading}
+        className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+      >
+        {loading ? "Processing..." : "Scan Document"}
+      </button>
 
-      <Dialog open={showFieldsDialog} onOpenChange={setShowFieldsDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Fill Form Fields</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            {selectedForm?.extracted_fields?.map((field: any, index: number) => (
-              <div key={index} className="space-y-2">
-                <Label htmlFor={field.name}>
-                  {field.label}
-                  {field.required && <span className="text-destructive ml-1">*</span>}
-                </Label>
-                <Input
-                  id={field.name}
-                  type={field.type}
-                  value={fieldValues[field.name] || ""}
-                  onChange={(e) => setFieldValues({ ...fieldValues, [field.name]: e.target.value })}
-                  required={field.required}
+      {error && <p className="text-red-500 mt-2">{error}</p>}
+
+      {scannedFields.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-lg font-medium mb-2">Detected Fields</h3>
+          <div className="space-y-2">
+            {scannedFields.map((field, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <label className="w-40">{field.field_name}</label>
+                <input
+                  className="border px-2 py-1 flex-1"
+                  value={field.field_value || ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setScannedFields((prev) =>
+                      prev.map((f, idx) =>
+                        idx === i ? { ...f, field_value: val } : f
+                      )
+                    );
+                  }}
                 />
               </div>
             ))}
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowFieldsDialog(false)}>Cancel</Button>
-            <Button onClick={handleSaveFields}>Save</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          <button
+            onClick={saveFields}
+            className="mt-4 px-4 py-2 bg-green-600 text-white rounded"
+          >
+            Save Info
+          </button>
+        </div>
+      )}
 
-      <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
-          <DialogHeader>
-            <DialogTitle>{selectedForm?.form_name}</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            {viewUrl ? (
-              selectedForm?.file_type?.startsWith("image/") ? (
-                <img
-                  src={viewUrl}
-                  alt={`Preview of ${selectedForm?.form_name}`}
-                  className="w-full h-auto rounded-md"
-                  loading="lazy"
-                />
-              ) : (
-                <iframe
-                  src={viewUrl}
-                  className="w-full h-[70vh] rounded-md border"
-                  title={selectedForm?.form_name}
-                />
-              )
-            ) : (
-              <p className="text-muted-foreground text-center py-8">Loading preview...</p>
-            )}
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowViewDialog(false)}>Close</Button>
-            <Button onClick={() => handleDownload(selectedForm)}>
-              <Download className="mr-2 h-4 w-4" />
-              Download
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {forms.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-lg font-medium mb-2">Your Uploaded Forms</h3>
+          <ul className="space-y-1">
+            {forms.map((f) => (
+              <li key={f.id}>
+                <a
+                  href={f.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 underline"
+                >
+                  {f.file_name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
-}
+};
+
+export default PaperworkAssistant;
