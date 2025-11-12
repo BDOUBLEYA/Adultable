@@ -14,7 +14,334 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chat_sessions: {
+        Row: {
+          created_at: string | null
+          id: string
+          messages: Json | null
+          session_type: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          messages?: Json | null
+          session_type: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          messages?: Json | null
+          session_type?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      form_fields: {
+        Row: {
+          bbox: Json | null
+          confidence: number | null
+          created_at: string
+          field_key: string
+          field_label: string | null
+          form_id: string
+          id: string
+          page: number
+          source: string | null
+          updated_at: string
+          user_id: string
+          value: string | null
+        }
+        Insert: {
+          bbox?: Json | null
+          confidence?: number | null
+          created_at?: string
+          field_key: string
+          field_label?: string | null
+          form_id: string
+          id?: string
+          page?: number
+          source?: string | null
+          updated_at?: string
+          user_id: string
+          value?: string | null
+        }
+        Update: {
+          bbox?: Json | null
+          confidence?: number | null
+          created_at?: string
+          field_key?: string
+          field_label?: string | null
+          form_id?: string
+          id?: string
+          page?: number
+          source?: string | null
+          updated_at?: string
+          user_id?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_fields_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forms: {
+        Row: {
+          created_at: string
+          extracted_fields: Json | null
+          file_size: number | null
+          file_type: string | null
+          file_url: string
+          filled_file_url: string | null
+          form_name: string
+          id: string
+          layout_hash: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          extracted_fields?: Json | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url: string
+          filled_file_url?: string | null
+          form_name: string
+          id?: string
+          layout_hash?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          extracted_fields?: Json | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string
+          filled_file_url?: string | null
+          form_name?: string
+          id?: string
+          layout_hash?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forms_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      meal_plans: {
+        Row: {
+          budget: number
+          created_at: string
+          days: number
+          grocery_list: Json | null
+          id: string
+          plan_name: string
+          recipes: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          budget: number
+          created_at?: string
+          days: number
+          grocery_list?: Json | null
+          id?: string
+          plan_name: string
+          recipes?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          budget?: number
+          created_at?: string
+          days?: number
+          grocery_list?: Json | null
+          id?: string
+          plan_name?: string
+          recipes?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meal_plans_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          full_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      recommendations: {
+        Row: {
+          category: string
+          completed: boolean
+          created_at: string
+          description: string
+          dismissed: boolean
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category: string
+          completed?: boolean
+          created_at?: string
+          description: string
+          dismissed?: boolean
+          id?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          completed?: boolean
+          created_at?: string
+          description?: string
+          dismissed?: boolean
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recommendations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          all_day: boolean | null
+          category: string
+          completed: boolean
+          created_at: string
+          due_date: string
+          end_time: string | null
+          id: string
+          priority: string
+          start_time: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          all_day?: boolean | null
+          category: string
+          completed?: boolean
+          created_at?: string
+          due_date: string
+          end_time?: string | null
+          id?: string
+          priority: string
+          start_time?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          all_day?: boolean | null
+          category?: string
+          completed?: boolean
+          created_at?: string
+          due_date?: string
+          end_time?: string | null
+          id?: string
+          priority?: string
+          start_time?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      user_personal_info: {
+        Row: {
+          created_at: string
+          field_name: string
+          field_value: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          field_name: string
+          field_value: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          field_name?: string
+          field_value?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
